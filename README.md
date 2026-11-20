@@ -7,6 +7,8 @@
 ```text
 index.html                    首页目录
 notes/
+  megatron-qwen38/
+    index.html                Megatron 新模型接入
   transformer/
     index.html                Transformer 架构图谱
 ```

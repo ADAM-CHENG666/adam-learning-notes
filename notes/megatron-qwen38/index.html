@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Megatron 新模型接入｜从 HF checkpoint 到 RL 闭环</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #f5f7fb;
+      --paper: #fff;
+      --ink: #16283d;
+      --body: #31465c;
+      --muted: #51667b;
+      --line: #dbe4ef;
+      --blue: #245099;
+      --blue-fill: #edf3ff;
+      --teal: #16675f;
+      --teal-fill: #eaf6f3;
+      --tensor-a: #3f60b4;
+      --tensor-b: #a14c23;
+      --wire: #748aa6;
+      --radius: 16px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--ink);
+      font: 16px/1.65 system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+    h1, h2, h3, p, figure, dl, dd { margin: 0; }
+    a { color: var(--blue); text-underline-offset: .2em; }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+    [id] { scroll-margin-top: 1.5rem; }
+    code { font: .88em ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+    .shell { width: min(1100px, calc(100% - 48px)); margin: 0 auto; }
+
+    .masthead { padding: 32px 0 18px; }
+    h1 { font-size: clamp(1.95rem, 5vw, 3.4rem); line-height: 1.17; letter-spacing: -.045em; }
+
+    .flow, .framework-guide, .chapter { padding: 17px 24px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); }
+    h2 { font-size: clamp(1.25rem, 2.5vw, 1.6rem); line-height: 1.3; letter-spacing: -.025em; }
+    .flow { display: grid; grid-template-columns: minmax(0, 1fr) 1.9rem minmax(0, 1.12fr); align-items: center; gap: 12px; }
+    .flow h2 { font-size: .92rem; letter-spacing: normal; }
+    .flow-start, .flow-loop { min-width: 0; }
+    .flow-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 3px 12px; margin-bottom: 9px; }
+    .flow-heading p { color: var(--muted); font-size: .78rem; }
+    .flow-entry { color: var(--muted); text-align: center; font-size: .8rem; line-height: 1.05; }
+    .flow-entry::after { display: block; color: var(--wire); font-size: 1.55rem; content: "→"; }
+
+    .format-map {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(3.25rem, .48fr) minmax(0, 1fr);
+      grid-template-areas: "hf-title . mega-title" "hf-network network mega-network" "hf-tensor bridge mega-tensor";
+      gap: 6px;
+    }
+    .format-hf { grid-area: hf-title; }
+    .node.format-mega { grid-area: mega-title; background: var(--blue); color: #fff; }
+    .node.format-mega > span { color: #e6efff; }
+    .node.format-hf, .node.format-mega { padding: 7px 9px; }
+    .format-hf-network { grid-area: hf-network; }
+    .format-mega-network { grid-area: mega-network; }
+    .format-network { grid-area: network; }
+    .format-bridge { grid-area: bridge; }
+    .format-hf-tensor { grid-area: hf-tensor; }
+    .format-mega-tensor { grid-area: mega-tensor; }
+    .mini-network {
+      display: grid;
+      grid-template-columns: 5px minmax(5px, 1fr) minmax(38px, 3fr) minmax(5px, 1fr) 5px;
+      align-items: center;
+      min-width: 0;
+      min-height: 61px;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--background);
+    }
+    .network-port { width: 5px; height: 5px; border-radius: 50%; background: var(--wire); }
+    .network-line { height: 1px; background: var(--wire); }
+    .network-fork {
+      height: 46px;
+      background:
+        linear-gradient(var(--wire), var(--wire)) left center / 50% 1px no-repeat,
+        linear-gradient(var(--wire), var(--wire)) center / 1px 50% no-repeat,
+        linear-gradient(var(--wire), var(--wire)) right 25% / 50% 1px no-repeat,
+        linear-gradient(var(--wire), var(--wire)) right 75% / 50% 1px no-repeat;
+    }
+    .network-merge { transform: scaleX(-1); }
+    .network-ranks { display: grid; gap: 4px; }
+    .network-module { padding: 3px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--body); text-align: center; font-size: .69rem; line-height: 1.2; }
+    .rank-a { border-inline-start: 3px solid var(--tensor-a); }
+    .rank-b { border-inline-start: 3px solid var(--tensor-b); }
+    .format-tensor { min-width: 0; }
+    .format-tensor p { margin-bottom: 4px; color: var(--muted); font-size: .73rem; }
+    .tensor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+    .tensor-joined { overflow: hidden; border-radius: 4px; }
+    .tensor-sharded { gap: 6px; }
+    .tensor-sharded span { border-radius: 4px; }
+    .tensor-part {
+      display: grid;
+      place-items: center;
+      min-height: 22px;
+      background:
+        repeating-linear-gradient(90deg, #ffffff31 0 1px, transparent 1px 25%),
+        linear-gradient(transparent 48%, #ffffff31 48% 52%, transparent 52%),
+        var(--part-color);
+      color: #fff;
+      font: 700 .69rem/1 system-ui, sans-serif;
+    }
+    .tensor-a { --part-color: var(--tensor-a); }
+    .tensor-b { --part-color: var(--tensor-b); }
+
+    .flow-loop { padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; }
+    .loop-grid {
+      display: grid;
+      isolation: isolate;
+      grid-template-columns: minmax(0, 1fr) minmax(3.65rem, .59fr) minmax(0, 1fr);
+      grid-template-rows: auto auto 1.5rem auto;
+      grid-template-areas: "inference . training" "rollout samples reward" "again . feedback" "refit weights trainer";
+      gap: 6px;
+    }
+    .loop-lane { grid-row: 1 / -1; z-index: -1; border-radius: 9px; }
+    .inference-lane { grid-column: 1; background: var(--teal-fill); }
+    .training-lane { grid-column: 3; background: var(--blue-fill); }
+    .lane-title { padding: 6px 7px 0; font-size: .75rem; font-weight: 700; }
+    .inference-title { grid-area: inference; color: var(--teal); }
+    .training-title { grid-area: training; color: var(--blue); }
+    .loop-rollout { grid-area: rollout; }
+    .loop-samples { grid-area: samples; }
+    .loop-samples .wire { background: repeating-linear-gradient(90deg, var(--wire) 0 5px, transparent 5px 8px); }
+    .loop-reward { grid-area: reward; }
+    .loop-feedback { grid-area: feedback; }
+    .loop-trainer { grid-area: trainer; }
+    .loop-weights { grid-area: weights; }
+    .loop-refit { grid-area: refit; }
+    .edge.loop-again { grid-area: again; position: relative; --edge-color: var(--teal); color: var(--teal); font-weight: 650; }
+    .loop-again span + span { position: absolute; left: calc(50% + 9px); white-space: nowrap; }
+    .loop-grid .node { margin-inline: 5px; padding: 7px; border: 1px solid var(--line); background: var(--paper); }
+    .loop-grid .loop-rollout { color: var(--teal); }
+    .loop-grid .loop-refit { border-color: var(--teal); background: var(--teal); }
+    .loop-trainer .tensor { max-width: 104px; margin-top: 4px; }
+    .loop-grid .tensor-part { min-height: 15px; font-size: .61rem; }
+    .loop-grid .loop-refit, .loop-grid .loop-trainer { margin-bottom: 5px; }
+    .loop-weights { --edge-color: var(--blue); }
+    .loop-weights .wire { margin-inline: 1px; }
+    .node {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: var(--blue-fill);
+      color: var(--blue);
+      text-decoration: none;
+    }
+    a.node:hover { border-color: currentColor; }
+    .node strong { font-size: .95rem; overflow-wrap: anywhere; }
+    .node > span { font-size: .79rem; line-height: 1.4; color: var(--body); }
+    .work { background: var(--teal); color: #fff; }
+    .work > span { color: #e2f5f0; }
+    .edge { align-self: center; display: grid; gap: 5px; text-align: center; color: var(--muted); font-size: .75rem; line-height: 1.3; }
+    .wire { display: block; position: relative; height: 2px; margin: 0 4px; background: var(--edge-color, var(--wire)); }
+    .wire::after {
+      content: "";
+      position: absolute;
+      right: -1px;
+      top: -3px;
+      border-top: 3.5px solid transparent;
+      border-bottom: 3.5px solid transparent;
+      border-left: 6px solid var(--edge-color, var(--wire));
+    }
+    .edge-left .wire, .edge-up .wire { transform: rotate(180deg); }
+    .edge-vertical { display: flex; align-items: center; justify-content: center; }
+    .edge-vertical .wire { width: 2px; height: 1.25rem; margin: 0; }
+    .edge-vertical .wire::after {
+      right: -2.5px;
+      top: auto;
+      bottom: -1px;
+      border: 3.5px solid transparent;
+      border-top: 6px solid var(--edge-color, var(--wire));
+      border-bottom: 0;
+    }
+
+    .framework-guide, .chapter { margin-top: 18px; }
+    .framework-guide h2 { font-size: 1.1rem; }
+    .framework-roles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 8px; }
+    .framework-role dt { color: var(--ink); font-size: .86rem; font-weight: 700; overflow-wrap: anywhere; }
+    .framework-role dd, .framework-note { color: var(--body); font-size: .8rem; }
+    .framework-note { margin: 8px 0; }
+    .chapter:target { border-color: var(--teal); }
+    .chapter dl { margin-top: 12px; }
+    .chapter dl > div { display: grid; grid-template-columns: 6.8rem minmax(0, 1fr); gap: 0 12px; padding: 8px 0; }
+    .chapter dl > div + div { border-top: 1px solid var(--line); }
+    .chapter dl > div:last-child { padding-bottom: 0; }
+    .chapter dt { color: var(--blue); font-size: .88rem; font-weight: 700; padding-top: 1px; }
+    .chapter dd { color: var(--body); font-size: .94rem; }
+    .chapter dd ul { margin: 0; padding-left: 1.15em; }
+    .chapter li + li, .chapter p + p { margin-top: 3px; }
+
+    .chapter-disclosure { padding: 0; }
+    .chapter-disclosure > summary {
+      width: 100%;
+      padding: 17px 24px;
+      border-radius: var(--radius);
+      color: var(--ink);
+      list-style: none;
+    }
+    .chapter-disclosure > summary::-webkit-details-marker { display: none; }
+    .chapter-disclosure > summary:hover { background: var(--blue-fill); }
+    .chapter-disclosure > summary:focus-visible { outline-offset: -4px; }
+    .chapter-disclosure[open] > summary { border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; }
+    .chapter-disclosure > summary h2 { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .disclosure-action { flex: 0 0 auto; color: var(--blue); font-size: .85rem; font-weight: 650; letter-spacing: normal; }
+    .disclosure-close, .chapter-disclosure[open] .disclosure-open { display: none; }
+    .chapter-disclosure[open] .disclosure-close { display: inline; }
+    .chapter-content { padding: 16px 24px 20px; }
+    .chapter-goal { color: var(--body); font-size: .95rem; }
+    .subtask, .validation, .case-study { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .chapter-content h3 { font-size: 1.06rem; line-height: 1.4; }
+    .subtask dl, .validation dl { margin-top: 4px; }
+    .scope-example { margin-top: 8px; }
+    .scope-example figcaption { margin-bottom: 6px; color: var(--muted); font-size: .78rem; }
+    .scope-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .scope-card { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--background); }
+    .scope-training { background: var(--blue-fill); }
+    .scope-card h4 { margin: 0; color: var(--ink); font-size: .96rem; line-height: 1.4; }
+    .scope-card > p { color: var(--muted); font-size: .78rem; }
+    .scope-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 7px 0; }
+    .scope-numbers div { padding: 5px 4px; border-radius: 5px; background: var(--paper); text-align: center; }
+    .scope-numbers b, .scope-numbers span { display: block; }
+    .scope-numbers b { color: var(--ink); font-size: 1.09rem; line-height: 1.25; }
+    .scope-numbers span { color: var(--muted); font-size: .71rem; }
+    .chapter .scope-decisions { display: grid; gap: 5px; margin-top: 7px; padding: 0; list-style: none; }
+    .scope-decisions li { display: flex; align-items: baseline; gap: 7px; font-size: .82rem; }
+    .scope-decisions li + li { margin-top: 0; }
+    .scope-state { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+    .scope-active { background: var(--teal-fill); color: var(--teal); }
+    .scope-frozen { background: #fff0d1; color: #754709; }
+    .scope-excluded { background: #e4ebf4; color: var(--muted); }
+    .port-entry { margin-bottom: 6px; }
+    .port-cards, .adaptation-levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .port-card > span { display: block; margin-top: 2px; color: var(--muted); font-size: .73rem; }
+    .architecture-toggle {
+      margin-top: 6px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--blue);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: .78rem;
+      font-weight: 650;
+      line-height: 1.4;
+    }
+    .architecture-toggle:hover { text-decoration: underline; text-underline-offset: .2em; }
+    .architecture-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .architecture-panel { grid-column: 1 / -1; grid-row: 2; }
+    .adaptation-diagram {
+      display: grid;
+      gap: 5px;
+      margin-top: 7px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: .73rem;
+      line-height: 1.35;
+    }
+    .adaptation-diagram > span { justify-self: start; }
+    .adaptation-diagram > span:first-child, .adaptation-node { padding: 3px 4px; }
+    .adaptation-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+    .adaptation-node { border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); }
+    .adaptation-change { border-radius: 4px; background: var(--blue-fill); color: var(--blue); font-weight: 700; }
+    .adaptation-node.adaptation-change { border-color: var(--blue); }
+    .adaptation-routing { border-color: var(--blue); background: var(--blue-fill); color: var(--blue); }
+    .adaptation-example { color: var(--muted); font-size: .73rem; font-weight: 550; }
+    .network-figure figcaption { margin-bottom: 6px; color: var(--ink); font-size: .84rem; font-weight: 700; }
+    .framework-role, .port-card, .adaptation-card, .network-view, .assembly-card { min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--background); }
+    .framework-core { background: var(--blue-fill); }
+    .framework-rollout { background: var(--teal-fill); }
+    .port-card h4, .adaptation-card h4, .network-view h5, .assembly-card h3 { margin: 0; color: var(--ink); font-size: .9rem; line-height: 1.35; overflow-wrap: anywhere; }
+    .network-view + .network-view { margin-top: 7px; }
+    .port-card p, .adaptation-card p, .network-view p { margin-top: 5px; color: var(--body); font-size: .8rem; }
+    .decoder-track {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 2.4rem minmax(0, 1fr);
+      align-items: center;
+      gap: 3px;
+      margin-top: 7px;
+      text-align: center;
+      font-size: .73rem;
+      line-height: 1.35;
+    }
+    .decoder-stage { padding: 5px; border: 1px solid var(--blue); border-radius: 6px; background: var(--blue-fill); }
+    .decoder-stage > b { display: block; margin-bottom: 4px; color: var(--blue); }
+    .decoder-layers { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 2px; }
+    .decoder-track > .decoder-layers { margin-inline: 6px; }
+    .decoder-layer { padding: 4px 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); }
+    .decoder-arrow { color: var(--muted); }
+    .decoder-transfer { color: var(--blue); font-size: .68rem; }
+    .decoder-transfer b { display: block; font-size: .98rem; line-height: 1; }
+    .network-details { margin-top: 8px; }
+    .network-details .network-figure { margin-top: 4px; }
+    .assembly-flow { display: grid; grid-template-columns: minmax(0, 1fr) .95rem minmax(0, 1.32fr) .95rem minmax(0, 1fr); align-items: center; gap: 5px; }
+    .assembly-model { background: var(--blue-fill); }
+    .assembly-card p { color: var(--body); font-size: .79rem; }
+    .assembly-card > span { display: block; color: var(--muted); font-size: .73rem; }
+    .assembly-arrow { text-align: center; color: var(--blue); line-height: 1; }
+    .assembly-arrow::before { content: "→"; }
+    .assembly-spec { margin-top: 5px; padding: 4px 6px; border: 1px dashed var(--wire); border-radius: 5px; background: var(--paper); font-size: .75rem; overflow-wrap: anywhere; }
+    .assembly-spec span { display: block; color: var(--muted); }
+    .case-study > p { margin-top: 6px; color: var(--muted); font-size: .9rem; }
+    .case-study ol { margin: 8px 0 0; padding-left: 1.5em; color: var(--body); font-size: .94rem; }
+    .case-study li + li { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .case-study li::marker { color: var(--blue); font-weight: 700; }
+    .case-study h4 { margin: 0 0 5px; color: var(--ink); font-size: 1rem; line-height: 1.45; }
+    .case-study li p + p { margin-top: 6px; }
+
+    .reference { margin: 27px 0 34px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .reference h2 { margin: 0 0 8px; font-size: 1.05rem; }
+    .reference p, .reference li { color: var(--muted); font-size: .85rem; }
+    details { margin-top: 7px; }
+    summary { cursor: pointer; width: fit-content; padding-block: 5px; color: var(--blue); font-size: .87rem; font-weight: 650; }
+    details ul { margin: 3px 0 8px; padding-left: 1.2em; }
+
+    @media (max-width: 890px) {
+      .flow { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+      .flow-entry::after { content: "↓"; }
+      .port-cards, .adaptation-levels { grid-template-columns: 1fr; }
+      .architecture-panel { grid-row: auto; }
+    }
+    @media (max-width: 660px) {
+      .shell { width: calc(100% - 28px); }
+      .masthead { padding-top: 16px; }
+      .flow, .framework-guide, .chapter { padding: 16px; }
+      .framework-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-loop { padding: 8px; }
+      .loop-grid .node { padding: 6px 5px; margin-inline: 3px; }
+      .loop-grid .node strong, .format-map .node strong { font-size: .83rem; }
+      .loop-grid .node > span, .format-map .node > span, .loop-weights, .loop-again { font-size: .7rem; }
+      .chapter dl > div { grid-template-columns: 1fr; gap: 3px; }
+      .chapter-disclosure { padding: 0; }
+      .chapter-disclosure > summary, .chapter-content { padding: 16px; }
+      .scope-columns { grid-template-columns: 1fr; }
+      .assembly-flow { grid-template-columns: 1fr; }
+      .assembly-arrow::before { content: "↓"; }
+    }
+    @media print {
+      body { background: #fff; }
+      .shell { width: 100%; }
+      .masthead { padding-top: 0; }
+      .chapter, .flow { break-inside: avoid; }
+      .chapter-disclosure { break-inside: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <h1>Megatron 新模型接入</h1>
+    </header>
+
+    <main>
+      <figure class="flow" id="flow" aria-label="新模型接入在 RL 全流程中的位置">
+        <div class="flow-start">
+          <div class="flow-heading"><h2>一次初始化</h2><p>同一投影层的 TP2 示意</p></div>
+          <div class="format-map">
+            <div class="node format-hf"><strong>HF</strong><span>Transformers 参考网络</span></div>
+            <a class="node format-mega" href="#build"><strong>① Megatron</strong><span>训练网络</span></a>
+
+            <div class="mini-network format-hf-network" role="img" aria-label="HF 参考网络的一路投影">
+              <span class="network-port"></span><span class="network-line"></span>
+              <span class="network-module">投影</span>
+              <span class="network-line"></span><span class="network-port"></span>
+            </div>
+            <div class="edge format-network"><span>构网适配</span><span class="wire" aria-hidden="true"></span></div>
+            <div class="mini-network format-mega-network" role="img" aria-label="Megatron 将同一个投影分到两个训练 rank 并行计算">
+              <span class="network-port"></span><span class="network-fork"></span>
+              <span class="network-ranks"><span class="network-module rank-a">Rank 0</span><span class="network-module rank-b">Rank 1</span></span>
+              <span class="network-fork network-merge"></span><span class="network-port"></span>
+            </div>
+
+            <div class="format-tensor format-hf-tensor"><p>HF 格式</p>
+              <div class="tensor tensor-joined" role="img" aria-label="HF 命名张量的完整逻辑权重，由 A 和 B 组成"><span class="tensor-part tensor-a">A</span><span class="tensor-part tensor-b">B</span></div>
+            </div>
+            <div class="edge format-bridge"><span>Bridge<br>权重映射</span><span class="wire" aria-hidden="true"></span></div>
+            <div class="format-tensor format-mega-tensor"><p>Megatron 分片</p>
+              <div class="tensor tensor-sharded" role="img" aria-label="Megatron 的两个 rank 分别持有 A 和 B 分片"><span class="tensor-part tensor-a">A</span><span class="tensor-part tensor-b">B</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="flow-entry" role="img" aria-label="用同一初始权重启动两端">θ₀</div>
+        <div class="flow-loop">
+          <div class="flow-heading"><h2>每轮 RL</h2><p>verl 编排</p></div>
+          <div class="loop-grid">
+            <div class="loop-lane inference-lane" aria-hidden="true"></div>
+            <div class="loop-lane training-lane" aria-hidden="true"></div>
+            <p class="lane-title inference-title">推理 · vLLM</p>
+            <p class="lane-title training-title">训练 · Megatron</p>
+            <a class="node loop-rollout" href="#rl"><strong>采样</strong><span>用 θ<sub>t</sub> 生成轨迹</span></a>
+            <div class="edge loop-samples"><span>轨迹</span><span class="wire" aria-hidden="true"></span></div>
+            <div class="node loop-reward"><strong>准备训练信号</strong><span>Reward / Advantage</span></div>
+            <div class="edge edge-vertical loop-feedback" aria-hidden="true"><span class="wire"></span></div>
+            <a class="node loop-trainer" href="#train"><strong>参数更新</strong><span>RL loss → θ<sub>t+1</sub></span>
+              <div class="tensor tensor-sharded" role="img" aria-label="更新后的 Megatron 分片"><span class="tensor-part tensor-a">A</span><span class="tensor-part tensor-b">B</span></div>
+            </a>
+            <div class="edge edge-left loop-weights">
+              <span>Bridge 导出</span>
+              <div class="tensor tensor-joined" role="img" aria-label="重组后的 HF 命名张量"><span class="tensor-part tensor-a">A</span><span class="tensor-part tensor-b">B</span></div>
+              <span>verl 传 HF 格式</span><span class="wire" aria-hidden="true"></span>
+            </div>
+            <a class="node work loop-refit" href="#refit"><strong>② 在线换权</strong><span>加载 θ<sub>t+1</sub></span></a>
+            <div class="edge edge-vertical edge-up loop-again"><span class="wire" aria-hidden="true"></span><span>下一轮</span></div>
+          </div>
+        </div>
+      </figure>
+
+      <section class="framework-guide" aria-labelledby="framework-title">
+        <h2 id="framework-title">框架分工与构网概念</h2>
+        <dl class="framework-roles">
+          <div class="framework-role"><dt>verl</dt><dd>编排采样、训练和权重同步。</dd></div>
+          <div class="framework-role framework-core"><dt>Megatron Core</dt><dd>运行训练模型，提供并行与调度。</dd></div>
+          <div class="framework-role"><dt>Megatron Bridge</dt><dd>适配 HF 模型的构网和权重转换。</dd></div>
+          <div class="framework-role framework-rollout"><dt>vLLM</dt><dd>加载推理权重并生成样本。</dd></div>
+        </dl>
+        <p class="framework-note">Qwen3.8 接入是在 Bridge 中注册模型家族适配器，复用既有的 Megatron Core 和并行调度。</p>
+        <figure class="network-figure">
+          <figcaption>从配置到训练模型</figcaption>
+          <div class="assembly-flow">
+            <div class="assembly-card">
+              <h3>Config</h3>
+              <span>模型规格 · 层数、维度、层类型</span>
+              <span>运行设置 · 并行与精度</span>
+            </div>
+            <div class="assembly-arrow" aria-hidden="true"></div>
+            <div class="assembly-card">
+              <h3>Provider</h3>
+              <p>按配置为当前 rank 构建模型。</p>
+              <div class="assembly-spec"><b>ModuleSpec</b><span>按需声明组件类、构造参数和子模块。</span></div>
+            </div>
+            <div class="assembly-arrow" aria-hidden="true"></div>
+            <div class="assembly-card assembly-model">
+              <h3>Model / Layer / Module</h3>
+              <p>构建出的网络在 <code>forward()</code> 中执行计算。</p>
+            </div>
+          </div>
+        </figure>
+      </section>
+
+      <div id="steps">
+        <details class="chapter chapter-disclosure" id="build">
+          <summary>
+            <h2 id="build-title">1. 把 HF 模型接入 Megatron <span class="disclosure-action" aria-hidden="true"><span class="disclosure-open">展开 ＋</span><span class="disclosure-close">收起 −</span></span></h2>
+          </summary>
+          <div class="chapter-content">
+            <p class="chapter-goal">这一章交付一个从 HF checkpoint 初始化、能在目标并行配置下正确更新参数的 Megatron 模型。更新后的权重是下一章在线同步的输入。</p>
+
+            <section class="subtask" aria-labelledby="scope-title">
+              <h3 id="scope-title">子任务 1　确定模型规格和训练范围</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>
+                  <p>从 HF 配置、权重索引和参考实现核实规格，再确定本轮启用哪些部分和更新哪些权重。</p>
+                  <figure class="scope-example">
+                    <figcaption>Qwen3.8-Flash-Next 示例</figcaption>
+                    <div class="scope-columns">
+                      <div class="scope-card">
+                        <h4>模型规格</h4>
+                        <p>原模型是什么</p>
+                        <div class="scope-numbers">
+                          <div><b>48</b><span>文本层</span></div>
+                          <div><b>512</b><span>路由专家 / 层</span></div>
+                          <div><b>10</b><span>路由 top-k</span></div>
+                        </div>
+                        <p>GDN / QSA · HC · PLE</p>
+                        <p>BF16 权重 · Tokenizer 与模板</p>
+                      </div>
+                      <div class="scope-card scope-training">
+                        <h4>训练范围</h4>
+                        <p>本轮启用和更新什么</p>
+                        <ul class="scope-decisions">
+                          <li><b class="scope-state scope-active">训练</b><span>文本主干的可训练参数</span></li>
+                          <li><b class="scope-state scope-frozen">冻结</b><span>PLE 表、QSA indexer</span></li>
+                          <li><b class="scope-state scope-excluded">排除</b><span>Vision、MTP</span></li>
+                        </ul>
+                      </div>
+                    </div>
+                  </figure>
+                </dd></div>
+                <div><dt>目的</dt><dd>明确后续要搭哪张网、装哪些权重，以及以什么配置和输入做对照。</dd></div>
+                <div><dt>验收指标</dt><dd>来源和参考版本可追溯，配置与实际张量的形状和 dtype 对得上。每项预期权重和 buffer 都有加载、训练、冻结或排除规则。记录目标并行、资源预算和对照输入。</dd></div>
+              </dl>
+            </section>
+
+            <section class="subtask" aria-labelledby="network-title">
+              <h3 id="network-title">子任务 2　实现模型适配</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>
+                  <div id="port-implementation">
+                    <p class="port-entry"><code>AutoBridge</code> 识别 HF 模型并选择对应的 Bridge 实现。</p>
+                    <div class="port-cards">
+                      <div class="port-card" id="architecture-card">
+                        <h4>网络架构实现</h4>
+                        <p>怎么构网和执行前向？</p>
+                        <span>Provider、ModuleSpec、模型模块</span>
+                        <button class="architecture-toggle" id="architecture-toggle" type="button" aria-expanded="false" aria-controls="architecture-levels">查看三级改动</button>
+                      </div>
+                      <figure class="network-figure architecture-panel" id="architecture-levels" hidden>
+                        <figcaption>对照 HF 的结构和状态，选能覆盖差异的最小改动</figcaption>
+                        <div class="adaptation-levels">
+                          <div class="adaptation-card">
+                            <h4>一级 · 改配置</h4>
+                            <div class="adaptation-diagram">
+                              <span class="adaptation-change">Config · 层数、维度</span>
+                              <div class="adaptation-chain">
+                                <span class="adaptation-node">Attention</span><span aria-hidden="true">→</span><span class="adaptation-node">MLP</span>
+                              </div>
+                            </div>
+                            <p>现有 Decoder 已支持这套计算。Provider 读入 HF 规格并复用现有模型和层。</p>
+                          </div>
+                          <div class="adaptation-card">
+                            <h4>二级 · 换组件</h4>
+                            <div class="adaptation-diagram">
+                              <span>ModuleSpec 选实现</span>
+                              <div class="adaptation-chain">
+                                <span class="adaptation-node adaptation-change">新 Attention</span><span aria-hidden="true">→</span><span class="adaptation-node">MLP</span>
+                              </div>
+                            </div>
+                            <p>沿用骨干的调用位置和接口，在对应位置换用新的 Attention、MLP 或 Norm。</p>
+                          </div>
+                          <div class="adaptation-card">
+                            <h4>三级 · 改前向流程 <span class="adaptation-example">Qwen3.8 示意</span></h4>
+                            <div class="adaptation-diagram adaptation-routing">
+                              <span>四路 HC 残差 + 原始 token <span aria-hidden="true">↓</span></span>
+                              <div class="adaptation-chain">
+                                <span class="adaptation-node">PLE</span><span aria-hidden="true">→</span><span class="adaptation-node">Attention</span><span aria-hidden="true">→</span><span class="adaptation-node">MoE</span>
+                              </div>
+                              <span>四路 HC 残差传给下一层</span>
+                            </div>
+                            <p>模块顺序、输入或状态传递有差异时，实现专用 Layer、Block 或 Model，再接入 MCore 调度。</p>
+                          </div>
+                        </div>
+                      </figure>
+                      <div class="port-card" id="weights">
+                        <h4 id="weights-title">参数映射</h4>
+                        <p>HF 参数值应该装到哪里？</p>
+                        <span>Mapping Registry、checkpoint 转换</span>
+                      </div>
+                      <div class="port-card">
+                        <h4>并行支持</h4>
+                        <p>各卡负责哪部分，彼此传什么？</p>
+                        <span>Core 的 TP、PP、EP 等并行机制</span>
+                      </div>
+                    </div>
+                  </div>
+                </dd></div>
+                <div><dt>目的</dt><dd>在目标并行布局下构建 HF 定义的模型，并把权重装到各 rank 的对应位置。</dd></div>
+                <div><dt>验收指标</dt><dd>
+                  <ul>
+                    <li><b>网络架构</b>　标准入口构建出的层数、模块、调用顺序和状态接口符合模型定义。</li>
+                    <li><b>参数映射</b>　完整加载权重和 buffer，独立核对各 rank 的值。BF16 纯重排的 HF → Megatron → HF 往返逐项一致。</li>
+                    <li><b>并行支持</b>　各 rank 的层、张量和专家归属符合配置，跨组状态的形状和数据类型符合接口约定。</li>
+                  </ul>
+                </dd></div>
+              </dl>
+            </section>
+
+            <section class="subtask" id="train" aria-labelledby="train-title">
+              <h3 id="train-title">子任务 3　接通训练并验证参数更新</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>把训练 batch 的 token、position、mask 和 label 接到模型，配置 loss、反向与优化器。正式 verl 路径还要处理 packing 的样本隔离、变长微批和 loss 归一化。</dd></div>
+                <div><dt>目的</dt><dd>让模型在正确的 token 上算出 loss，并使梯度更新到预期的参数。</dd></div>
+                <div><dt>验收指标</dt><dd>
+                  <ul>
+                    <li id="forward"><b>前向</b>　固定同一权重和输入 token，与参考实现的 logits、逐 token logprob 按冻结阈值对照。</li>
+                    <li><b>Loss</b>　用同一份 logits 独立复算，核对下一 token 标签偏移、mask 和有效 token 数。</li>
+                    <li><b>参数更新</b>　在目标训练入口和并行配置跑真实 <code>optimizer.step()</code>。梯度有限，指定参数实际变化，冻结参数和静态 buffer 保持原值。</li>
+                  </ul>
+                </dd></div>
+              </dl>
+            </section>
+
+            <section class="case-study" id="qwen" aria-labelledby="qwen-title">
+              <h3 id="qwen-title">Qwen3.8 实测</h3>
+              <p>11 月 17–19 日的接入记录。Leader 先确定调试范围和对照，再实现模型适配，最后把验证从四层扩大到完整模型。</p>
+              <ol>
+                <li>
+                  <h4>确定模型规格和本轮训练范围</h4>
+                  <p><b>实际工作</b>　核对 Qwen3.8-Flash-Next BF16 的配置、索引和 131 个分片头。首轮选纯文本、关闭 MTP，取前四层做调试，冻结 PLE 表和 QSA indexer。前四层涵盖 3 层 GDN、1 层 QSA、HC 和 PLE，每层保留全部 512 个专家。团队缩小 PLE 表，保留查表和注入路径。441 个保留张量与源权重的 SHA-256 一致。</p>
+                  <p><b>环境问题</b>　共享 vLLM 环境用 Python 3.11，Bridge 需要 3.12，两端的 Transformers 版本要求也没有交集。Leader 固定了两套各自独立的 Python 3.12 环境，保持相同 Ray 版本，先用小张量验证跨环境的 verl CUDA IPC 传输。</p>
+                  <p><b>对照问题</b>　Leader 要求本轮独立建立 vLLM 冷启动基线。原生 QSA 在长输入触发选择性选块后出现重复运行波动。团队试过确定性 top-k，随后按 leader 的要求撤回补丁，改用原生结果冻结验收规则，6 类选择性 QSA 输出保留未决。</p>
+                </li>
+                <li>
+                  <h4>实现 Qwen3.8 的 Bridge 适配</h4>
+                  <p><b>网络架构实现</b>　在 Bridge 中新增 <code>Qwen38Model</code> 和 DecoderLayer，复用 Core 的 GDN、MoE，接入 Qwen 的 HC、PLE 和 QSA。HC 和 PLE 先各自验证前后向，再经 AutoBridge 组装四层网络。</p>
+                  <p><b>参数映射</b>　用 98 组规则处理专家编号、投影拆合和 PLE 分片。四层单卡的 114 个 HF 文本状态键对应 4,222 项 Megatron 逻辑状态，独立核对加载值，两次完整导出逐项一致。</p>
+                  <p><b>并行支持</b>　四层实测 EP、PP、TP 及 EP2+PP2 组合。PP2 把四层分成两段，沿用 Core 调度，在两段间传递四路 HC 残差。</p>
+                  <details class="network-details">
+                    <summary>调试问题和四层 PP 图</summary>
+                    <p><b>模块复用</b>　Core mHC 使用流级门控，Qwen 用低秩网络生成逐特征门控。团队复用归一化等基础设施，保留 Qwen 的公式。PLE 参考 DeepSeek Engram 和 Gemma 的实现，保留自身的哈希、门控和卷积。</p>
+                    <p><b>GDN 反向</b>　梯度核对发现 TE 反向会重读模块权重。团队改为以单位缩放调用 TE 归一化，再按 Qwen 原顺序应用可训练的缩放参数，复跑前后向。</p>
+                    <p><b>导出入口</b>　verl 缓存转换任务时，AutoBridge 分派的新 Bridge 实例缺少先前构建阶段的配置。修复后从实际模型恢复映射所需配置，再验证缓存入口和 CUDA 导出。PLE 表也按行拼接，并核对 padding 和三个整数 buffer。</p>
+                    <figure class="network-figure">
+                      <figcaption>同一段前向如何分给两个 PP 段</figcaption>
+                      <div class="network-view">
+                        <h5>模型网络实现 · 每层怎么算</h5>
+                        <div class="decoder-track">
+                          <div class="decoder-layers">
+                            <b class="decoder-layer">第 1 层</b><span class="decoder-arrow" aria-hidden="true">→</span><b class="decoder-layer">第 2 层</b>
+                          </div>
+                          <span class="decoder-arrow" aria-hidden="true">→</span>
+                          <div class="decoder-layers">
+                            <b class="decoder-layer">第 3 层</b><span class="decoder-arrow" aria-hidden="true">→</span><b class="decoder-layer">第 4 层</b>
+                          </div>
+                        </div>
+                        <p>按 HF 的层序组装三层 GDN 和一层 QSA。PLE 在指定层用原始 token 查表，各层按 Qwen 的 HC 公式更新残差。</p>
+                      </div>
+                      <div class="network-view">
+                        <h5>并行执行 · 各卡负责哪部分</h5>
+                        <div class="decoder-track">
+                          <div class="decoder-stage">
+                            <b>GPU 组 A</b>
+                            <div class="decoder-layers">
+                              <b class="decoder-layer">第 1 层</b><span class="decoder-arrow" aria-hidden="true">→</span><b class="decoder-layer">第 2 层</b>
+                            </div>
+                          </div>
+                          <span class="decoder-transfer">传激活<b aria-hidden="true">→</b></span>
+                          <div class="decoder-stage">
+                            <b>GPU 组 B</b>
+                            <div class="decoder-layers">
+                              <b class="decoder-layer">第 3 层</b><span class="decoder-arrow" aria-hidden="true">→</span><b class="decoder-layer">第 4 层</b>
+                            </div>
+                          </div>
+                        </div>
+                        <p>复用 Megatron 的流水线并行（PP）分层。Qwen3.8 接好跨组接口，把四路 HC 残差传给下一组。TP 切张量，EP 分专家。</p>
+                      </div>
+                    </figure>
+                  </details>
+                </li>
+                <li>
+                  <h4>验证计算和参数更新，再扩大到 48 层</h4>
+                  <p><b>同一个 Megatron 先算稳</b>　四层固定输入重复运行时，MoE 专家输出的 BF16 原子累加顺序会引入波动。Leader 启用 Core 已有的 TE 汇总路径，三个独立进程各跑三轮，输出逐位一致。</p>
+                  <p><b>四层做真实更新</b>　用固定的小批次跑前向、反向和一次独立 SGD。590 项参数实际变化，冻结项和静态 buffer 保持原值。</p>
+                  <p><b>48 层定位训推差异</b>　用同一权重和 token 比 Megatron 与 vLLM。首轮短样本的最大 logprob 差为 <code>2.6882</code>。逐层回放发现，第 1 层 HC 的舍入顺序先引入差异，GDN 中间精度继续带来偏差，第 3 层 MoE 在路由边界换了一个专家，放大了输出差。给两边相同的 MoE 输入时，路由 logits 和专家集合都一致。跨实现 BF16 前向仍超出门槛。</p>
+                  <p><b>Loss 与正式训练</b>　48 层分片交叉熵与用同一份 logits 复算的 FP32 参考最大差为 <code>1.91e-6</code>，通过该用例的 loss 计算检查。正式训练审查仍有 packed sequence 样本隔离和变长微批的 loss 归一化待补验，完整模型的优化器更新也待验收。</p>
+                </li>
+              </ol>
+            </section>
+          </div>
+        </details>
+
+        <details class="chapter chapter-disclosure" id="refit">
+          <summary>
+            <h2 id="refit-title">2. 把训练权重同步给 vLLM <span class="disclosure-action" aria-hidden="true"><span class="disclosure-open">展开 ＋</span><span class="disclosure-close">收起 −</span></span></h2>
+          </summary>
+          <div class="chapter-content">
+            <p class="chapter-goal">这一章把 Megatron 当前持有的权重交给已经在运行的 vLLM。一次同步要走完 <b>Bridge 导出 → verl 传输 → vLLM 加载 → 发布版本</b>，下一轮采样使用完整的新版本。</p>
+
+            <section class="subtask" id="refit-export" aria-labelledby="refit-export-title">
+              <h3 id="refit-export-title">子任务 1　从训练侧导出目标版本的权重</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>Bridge 用 <code>export_hf_weights()</code> 读取 Megatron 内存里的参数。按训练侧 TP/PP/EP 布局重组分片，产出 HF 名称和布局的张量流，同时明确冻结参数与 buffer 的处理规则。</dd></div>
+                <div><dt>目的</dt><dd>把同一个版本的模型状态转换成 vLLM 能按名称理解的张量。训练和推理可以采用各自的并行布局。</dd></div>
+                <div><dt>验收指标</dt><dd>所有必要 rank 参与导出。按目标版本的独立清单核对名称、shape、dtype、专家编号和内容，覆盖冻结权重与必要 buffer。纯 BF16 布局变换按位核对。</dd></div>
+              </dl>
+            </section>
+
+            <section class="subtask" id="refit-transport" aria-labelledby="refit-transport-title">
+              <h3 id="refit-transport-title">子任务 2　用 verl 把张量交给推理 worker</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>verl 将多个张量装进可复用的通信缓冲区。Qwen3.8 的同机实验通过 CUDA IPC 传递显存句柄及名称、形状、dtype 和字节偏移。超过桶容量的单个源张量使用独立句柄直传。</dd></div>
+                <div><dt>目的</dt><dd>小张量合批以减少进程间交接次数，大张量直传以控制额外暂存显存。</dd></div>
+                <div><dt>验收指标</dt><dd>逐项对比发送和接收的元数据及内容散列。接收端消费完一桶再确认，发送端收到确认后才复用缓冲区。覆盖漏桶、重复项、错误内容、中断超时及大张量直传。</dd></div>
+              </dl>
+            </section>
+
+            <section class="subtask" id="refit-load" aria-labelledby="refit-load-title">
+              <h3 id="refit-load-title">子任务 3　由 vLLM 写入运行中的模型</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>运行在 vLLM worker 内的 verl 扩展接收张量，调用 vLLM 的 <code>load_weights()</code>。loader 按推理侧分片写入目标参数，处理跨桶到达的融合参数和必要 buffer，整轮接收后完成加载后处理。</dd></div>
+                <div><dt>目的</dt><dd>让 vLLM 每个 rank 最终持有该版本的正确分片，包含融合后的完整权重和推理所需状态。</dd></div>
+                <div><dt>验收指标</dt><dd>核对 loader 实际写入集合。用同一权重和推理配置独立冷启动 vLLM，逐 rank 比较最终参数、持久 buffer、分片和别名。FP8 路径还要独立验证 scale、重打包及重复换权。</dd></div>
+              </dl>
+            </section>
+
+            <section class="subtask" id="refit-publish" aria-labelledby="refit-publish-title">
+              <h3 id="refit-publish-title">子任务 4　安全发布版本并恢复采样</h3>
+              <dl>
+                <div><dt>做什么</dt><dd>换权前暂停采样，处理在途请求。协调器汇总整轮张量清单、loader 结果和所有 worker 回执，使旧的 KV 和前缀等缓存失效，发布新版本后再放行。失败时保持暂停，用一次新的全量同步恢复。</dd></div>
+                <div><dt>目的</dt><dd>vLLM 会逐桶写入，换权期间显存中可能暂时同时存在新旧数据。统一放行让一次 rollout 只使用一个已验证的完整版本。</dd></div>
+                <div><dt>验收指标</dt><dd>失败事务即使已写入首桶也无法发布或产出样本。成功后首个新请求的旧缓存命中为 0。重复同步、版本切换和回退都与对应冷启动参考一致，样本可追溯到实际权重版本。</dd></div>
+              </dl>
+            </section>
+
+            <section class="validation" id="refit-validation" aria-labelledby="refit-validation-title">
+              <h3 id="refit-validation-title">用两组实验验证整条链路</h3>
+              <dl>
+                <div><dt>零步 θ₀</dt><dd>用初始权重做在线同步。隔离的测试引擎先扰动部分权重和 buffer，再检查是否恢复到独立冷加载的 θ₀。这能验证转换、传输和加载确实执行了。</dd></div>
+                <div><dt>训练后 θ₁</dt><dd>在 Megatron 做真实参数更新。让已运行的 vLLM 从 θ₀ 热更新到 θ₁，用独立冷加载的同一份 θ₁ 核对状态和固定 token 输出，并检查实际变化。</dd></div>
+              </dl>
+            </section>
+
+            <section class="case-study" id="qwen-refit" aria-labelledby="qwen-refit-title">
+              <h3 id="qwen-refit-title">Qwen3.8 实测</h3>
+              <p>11 月 18–19 日的记录。Leader 先用四层 BF16 验权重搬运，再做真实更新和故障注入，最后把零步试验扩大到完整 48 层。</p>
+              <ol>
+                <li>
+                  <h4>先导出 θ₀，再为 θ₁ 建独立参考</h4>
+                  <p><b>实际工作</b>　四层模型的 Bridge 从 Megatron 导出了 114 个 HF 命名 CUDA 张量，逐项对照初始 checkpoint。做完真实 SGD 后，同一入口从训练进程的内存导出 θ₁。</p>
+                  <p><b>怎么核对新版本</b>　实验另存了 θ₁ 快照，用独立映射从快照重建 4,222 项训练端状态，再与 Megatron 的实际状态逐项核对。另一个 vLLM 进程独立冷加载这份 θ₁，给热更新提供对照。</p>
+                </li>
+                <li>
+                  <h4>用真实 IPC 传输，检查桶和 worker 的边界</h4>
+                  <p><b>首次试验的问题</b>　接收观测器挂在了错误位置，虽然权重恢复了，接收明细仍是空的。团队把观测移到真正执行接收和加载的 vLLM worker，再完整重跑。512 MiB 配置下，114 个张量共形成 15 个接收批次。</p>
+                  <p><b>复测怎么做</b>　同版本连续用 512、64、2048、512 MiB 同步。64 MiB 时，第一层 GDN 的 QKV 和 Z 分别进入两个桶，loader 最终把它们写进同一份融合权重。每层 3200 MiB 的专家 gate/up 张量单独走 IPC 直传。四轮张量内容一致，确认了缓冲区复用和跨桶融合。</p>
+                </li>
+                <li>
+                  <h4>扰动后恢复，再验真实更新是否写入</h4>
+                  <p><b>零步</b>　四层测试引擎实际扰动了 89 项可写状态，涵盖全部专家及 PLE 整数 buffer。同步后，连同静态 scale 共 93 项状态与冷加载逐位一致。只留一个专家未恢复的对照也能被检出。</p>
+                  <p><b>训练后</b>　θ₁ 热更新后的 93 项状态与 θ₁ 冷加载逐位一致，其中 75 项相对 θ₀ 确实改变。16 项可判定输出检查全过，最大 logprob 差为 0。6 类选择性 QSA 的输出因原生重复性波动仍未决，真实更新整项保持待验收。</p>
+                </li>
+                <li>
+                  <h4>让不完整版本无法发布，并实测全量恢复</h4>
+                  <p><b>遇到的问题</b>　vLLM 0.32 的暂停接口与旧调用不兼容。团队按实际接口派发并让失败向上传播。初次故障注入还发现漏桶、缺 LM head、截短专家矩阵和同形状错切片会被误报成功。</p>
+                  <p><b>怎么修和怎么验</b>　把预期张量清单、连续桶序号、封存内容散列和整轮回执接进 verl。四层 GPU 试验中，七类故障均被拒绝。即使首桶已写入，推理仍保持暂停。全量重发 θ₁ 后，93 项状态逐位匹配冷端，恢复后的首个请求旧缓存命中为 0。封存前的切片正确性仍由第一章的独立映射核对覆盖。</p>
+                  <p><b>完整模型已验</b>　48 层 BF16 在 Megatron TP2+PP2+EP2 到 vLLM TP4 的布局上实测了零步换权。训练端重组 1,294 个源张量，每个 vLLM worker 的 962 项状态匹配独立冷加载，短输入回放一致。</p>
+                  <p><b>待验收</b>　选择性 QSA 长输入的输出仍未决。正式 verl 作业的多副本恢复已有 CPU 回归，GPU 在线换权仍待验收。完整模型训练后的换权和 FP8 rollout 也待验收。</p>
+                </li>
+              </ol>
+            </section>
+          </div>
+        </details>
+
+        <section class="chapter" id="rl" aria-labelledby="rl-title">
+          <h2 id="rl-title">3. 联调连续 RL</h2>
+          <dl>
+            <div><dt>工程工作</dt><dd>在正式 verl 作业里，用真实 rollout 的奖励计算 Advantage，再用 RL loss 驱动 Megatron 更新。同步新权重后开始下一轮采样。</dd></div>
+            <div><dt>验收指标</dt><dd>连续运行多个 step。逐轮核对奖励进入训练、参数实际变化、下一批样本使用的权重版本，并记录 reward、loss 和换权开销。</dd></div>
+            <div><dt>Qwen3.8 实测</dt><dd>已有训练端加载与优化器初始化记录。完整模型的优化器更新和正式 verl 连续 RL 仍待验收。</dd></div>
+          </dl>
+        </section>
+      </div>
+    </main>
+
+    <footer class="reference" id="pdf">
+      <h2>对照 PDF 阅读</h2>
+      <p>《Megatron 新模型接入：网络、Bridge 与参数同步》用 DeepSeek V4.1 演示接口。Qwen3.8 实测以 2026 年 11 月 19 日的项目记录为准。</p>
+      <details>
+        <summary>按问题找页码</summary>
+        <ul>
+          <li>框架分工与 <code>AutoBridge</code> 选择 · 第 1–2 页</li>
+          <li>Config、Provider、ModuleSpec 及训练就绪条件 · 第 2–4 页</li>
+          <li>映射规则、加载、在线导出和 checkpoint 保存 · 第 4–6 页</li>
+          <li>verl 传输、vLLM 加载和失败处理 · 第 6–8 页</li>
+          <li>从小模型到正式训练与连续 RL 的验收顺序 · 第 8–9 页</li>
+        </ul>
+      </details>
+      <details>
+        <summary>并行术语速查</summary>
+        <p>TP 切张量，PP 切网络层，EP 分专家，ETP 切专家内部张量，CP 分上下文，DP 用模型副本处理不同数据。接入时要核对切分维度、全局层号和专家编号。</p>
+      </details>
+      <details>
+        <summary>正式 verl 训练还要验什么</summary>
+        <p>检查 packed sequence 的样本隔离、loss 的有效 token 归一化、变长微批的调度，以及模型和优化器的断点恢复。</p>
+      </details>
+    </footer>
+  </div>
+  <script>
+    function revealChapterTarget(hash) {
+      const target = document.getElementById(hash.slice(1));
+      const chapter = target?.closest('.chapter-disclosure');
+      if (chapter) {
+        chapter.open = true;
+      }
+    }
+
+    for (const link of document.querySelectorAll('.flow a[href^="#"]')) {
+      link.addEventListener('click', () => revealChapterTarget(link.hash));
+    }
+    revealChapterTarget(window.location.hash);
+    window.addEventListener('hashchange', () => revealChapterTarget(window.location.hash));
+
+    const portImplementation = document.getElementById('port-implementation');
+    const architectureCard = document.getElementById('architecture-card');
+    const architectureToggle = document.getElementById('architecture-toggle');
+    const architectureLevels = document.getElementById('architecture-levels');
+    let architecturePinned = false;
+
+    function showArchitectureLevels(visible) {
+      architectureLevels.hidden = !visible;
+      architectureToggle.setAttribute('aria-expanded', String(visible));
+      architectureToggle.textContent = '查看三级改动';
+      if (visible) {
+        architectureToggle.textContent = architecturePinned ? '收起三级改动' : '保持展开';
+      }
+    }
+
+    architectureCard.addEventListener('pointerenter', (event) => {
+      if (event.pointerType === 'mouse') showArchitectureLevels(true);
+    });
+    portImplementation.addEventListener('pointerleave', (event) => {
+      if (event.pointerType === 'mouse' && !architecturePinned) showArchitectureLevels(false);
+    });
+    architectureToggle.addEventListener('click', () => {
+      architecturePinned = !architecturePinned;
+      showArchitectureLevels(architecturePinned);
+    });
+  </script>
+</body>
+</html>

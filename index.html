@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<meta name="description" content="ADAM 的学习笔记目录。收录 Transformer 架构、模型配置和多 GPU 并行的交互笔记。">
+<meta name="description" content="ADAM 的学习笔记目录。收录 Transformer 架构、模型配置、多 GPU 并行和 Megatron 新模型接入的交互笔记。">
 <title>ADAM 的学习笔记</title>
 <script>
 (() => {
@@ -92,6 +92,17 @@ h1 { font-size: clamp(33px, 7vw, 63px); line-height: 1.14; letter-spacing: -.07e
           <nav class="note-links" aria-label="Transformer 图谱章节">
             <a href="notes/transformer/index.html#config-lab">配置实验</a>
             <a href="notes/transformer/index.html#parallelism">并行处理</a>
+          </nav>
+        </article>
+      </li>
+      <li>
+        <article class="note">
+          <h3><a href="notes/megatron-qwen38/index.html">Megatron 新模型接入</a></h3>
+          <p>以 Qwen3.8 为例，梳理 HF checkpoint 接入、vLLM 在线换权和连续 RL 联调。</p>
+          <nav class="note-links" aria-label="Megatron 新模型接入章节">
+            <a href="notes/megatron-qwen38/index.html#build">模型接入</a>
+            <a href="notes/megatron-qwen38/index.html#refit">权重同步</a>
+            <a href="notes/megatron-qwen38/index.html#rl">RL 联调</a>
           </nav>
         </article>
       </li>
