@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<meta name="description" content="ADAM 的学习笔记目录。收录 Transformer 架构、模型配置、多 GPU 并行和 Megatron 新模型接入的交互笔记。">
+<meta name="description" content="ADAM 的学习笔记目录。收录 Transformer、Megatron 和 LazyMind 外部 Agent 工作流接入的交互图解。">
 <title>ADAM 的学习笔记</title>
 <script>
 (() => {
@@ -40,7 +40,7 @@ body {
   color: var(--ink);
   font: 15px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-h1, h2, h3, p { margin: 0; }
+h1, h2, h3, h4, p { margin: 0; }
 a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 4px; }
 a:hover { text-decoration: underline; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
@@ -58,10 +58,13 @@ h1 { font-size: clamp(33px, 7vw, 63px); line-height: 1.14; letter-spacing: -.07e
 .intro p { margin-top: 12px; color: var(--muted); }
 .catalog { padding-block: 16px 50px; border-top: 1px solid var(--line); }
 .catalog h2 { font-size: 17px; font-weight: 670; }
+.note-category { margin-top: 15px; }
+.note-category + .note-category { margin-top: 27px; padding-top: 16px; border-top: 1px solid var(--line); }
+.note-category h3 { font-size: 18px; font-weight: 670; }
 .note-list { list-style: none; padding: 0; margin: 11px 0 0; display: grid; gap: 9px; }
 .note { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 17px 19px; }
-.note h3 { font-size: 20px; line-height: 1.3; letter-spacing: -.035em; }
-.note h3 a { color: var(--deep); }
+.note h4 { font-size: 20px; line-height: 1.3; letter-spacing: -.035em; }
+.note h4 a { color: var(--deep); }
 .note p { color: var(--muted); margin-top: 6px; font-size: 14px; }
 .note-links { display: flex; flex-wrap: wrap; gap: 5px 16px; margin-top: 9px; font-size: 13px; }
 @media (max-width: 540px) {
@@ -80,33 +83,51 @@ h1 { font-size: clamp(33px, 7vw, 63px); line-height: 1.14; letter-spacing: -.07e
 <main class="wrap">
   <header class="intro">
     <h1>ADAM 的学习笔记</h1>
-    <p>用交互图梳理模型架构和训练实现。</p>
+    <p>用交互图梳理模型架构、训练实现和 LazyMind 接入。</p>
   </header>
   <section class="catalog" id="notes" aria-labelledby="catalog-title">
     <h2 id="catalog-title">笔记目录</h2>
-    <ul class="note-list">
-      <li>
-        <article class="note">
-          <h3><a href="notes/transformer/index.html">Transformer 架构图谱</a></h3>
-          <p>沿着计算图看模型模块，拖动滑杆理解配置，用分步演示对比七种 GPU 并行方式。</p>
-          <nav class="note-links" aria-label="Transformer 图谱章节">
-            <a href="notes/transformer/index.html#config-lab">配置实验</a>
-            <a href="notes/transformer/index.html#parallelism">并行处理</a>
-          </nav>
-        </article>
-      </li>
-      <li>
-        <article class="note">
-          <h3><a href="notes/megatron-qwen38/index.html">Megatron 新模型接入</a></h3>
-          <p>以 Qwen3.8 为例，梳理 HF checkpoint 接入、vLLM 在线换权和连续 RL 联调。</p>
-          <nav class="note-links" aria-label="Megatron 新模型接入章节">
-            <a href="notes/megatron-qwen38/index.html#build">模型接入</a>
-            <a href="notes/megatron-qwen38/index.html#refit">权重同步</a>
-            <a href="notes/megatron-qwen38/index.html#rl">RL 联调</a>
-          </nav>
-        </article>
-      </li>
-    </ul>
+    <section id="llm" class="note-category" aria-labelledby="llm-title">
+      <h3 id="llm-title">LLM</h3>
+      <ul class="note-list">
+        <li>
+          <article class="note">
+            <h4><a href="notes/transformer/index.html">Transformer 架构图谱</a></h4>
+            <p>沿着计算图看模型模块，拖动滑杆理解配置，用分步演示对比七种 GPU 并行方式。</p>
+            <nav class="note-links" aria-label="Transformer 图谱章节">
+              <a href="notes/transformer/index.html#config-lab">配置实验</a>
+              <a href="notes/transformer/index.html#parallelism">并行处理</a>
+            </nav>
+          </article>
+        </li>
+        <li>
+          <article class="note">
+            <h4><a href="notes/megatron-qwen38/index.html">Megatron 新模型接入</a></h4>
+            <p>以 Qwen3.8 为例，梳理 HF checkpoint 接入、vLLM 在线换权和连续 RL 联调。</p>
+            <nav class="note-links" aria-label="Megatron 新模型接入章节">
+              <a href="notes/megatron-qwen38/index.html#build">模型接入</a>
+              <a href="notes/megatron-qwen38/index.html#refit">权重同步</a>
+              <a href="notes/megatron-qwen38/index.html#rl">RL 联调</a>
+            </nav>
+          </article>
+        </li>
+      </ul>
+    </section>
+    <section id="lazymind" class="note-category" aria-labelledby="lazymind-title">
+      <h3 id="lazymind-title">LazyMind</h3>
+      <ul class="note-list">
+        <li>
+          <article class="note">
+            <h4><a href="notes/lazymind-agent-workflow/index.html">外部 Agent 工作流接入架构</a></h4>
+            <p>通过交互组件图理解外部 Agent 如何启动工作流、控制原聊天和挂载面板。</p>
+            <nav class="note-links" aria-label="LazyMind 接入架构章节">
+              <a href="notes/lazymind-agent-workflow/index.html#architecture">组件图</a>
+              <a href="notes/lazymind-agent-workflow/index.html#hosts">宿主差异</a>
+            </nav>
+          </article>
+        </li>
+      </ul>
+    </section>
   </section>
 </main>
 </body>
